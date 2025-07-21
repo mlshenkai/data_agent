@@ -1,10 +1,10 @@
-import type { Base64ContentBlock } from "@langchain/core/messages";
+import type { Base64ContentBlock, PlainTextContentBlock } from "@langchain/core/messages";
 import { toast } from "sonner";
 
 // Returns a Promise of a typed multimodal block for images or PDFs
 export async function fileToContentBlock(
   file: File,
-): Promise<Base64ContentBlock> {
+): Promise<Base64ContentBlock | PlainTextContentBlock> {
   const supportedImageTypes = [
     "image/jpeg",
     "image/png",
@@ -38,12 +38,23 @@ export async function fileToContentBlock(
     };
   }
 
-  // PDF, Excel, or CSV files
+  // PDF files
+  if (file.type === "application/pdf") {
+    return {
+      type: "file",
+      source_type: "base64",
+      mime_type: file.type,
+      data,
+      metadata: { filename: file.name },
+    };
+  }
+
+  // CSV and Excel files - convert to text type for OpenAI API compatibility
   return {
-    type: "file",
-    source_type: "base64",
+    type: "text",
+    source_type: "text",
+    text: data,
     mime_type: file.type,
-    data,
     metadata: { filename: file.name },
   };
 }

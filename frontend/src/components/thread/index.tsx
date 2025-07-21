@@ -127,15 +127,30 @@ export function Thread() {
   );
   const [input, setInput] = useState("");
   const {
-    contentBlocks,
-    setContentBlocks,
+    uploadedFiles,
+    setUploadedFiles,
     handleFileUpload,
     dropRef,
-    removeBlock,
-    resetBlocks,
+    removeFile,
+    resetFiles,
     dragOver,
     handlePaste,
-  } = useFileUpload();
+  } = useFileUpload({
+    onFilePreview: (uploadedFile) => {
+      // Generate a preview message for CSV and Excel files
+      const fileType = uploadedFile.fileType === "text/csv" ? "CSV" : "Excel";
+      const previewMessage = `请帮我预览和分析这个${fileType}文件：${uploadedFile.fileName}。文件路径：${uploadedFile.filePath}。请显示文件的基本信息（行数、列数、数据类型）和前几行数据。`;
+      
+      // Add the preview message to the input
+      setInput(previewMessage);
+      
+      // Show a toast notification
+      toast.success(`已上传${fileType}文件：${uploadedFile.fileName}`, {
+        description: "已自动生成预览请求，您可以发送消息来查看文件内容",
+        duration: 3000,
+      });
+    },
+  });
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
@@ -197,17 +212,28 @@ export function Thread() {
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading)
+    if ((input.trim().length === 0 && uploadedFiles.length === 0) || isLoading)
       return;
     setFirstTokenReceived(false);
+
+    // 构建消息内容，包含文本和文件路径
+    const messageContent = [];
+    if (input.trim().length > 0) {
+      messageContent.push({ type: "text", text: input });
+    }
+    
+    // 添加文件路径信息
+    uploadedFiles.forEach(file => {
+      messageContent.push({ 
+        type: "text", 
+        text: `文件：${file.fileName} (${file.filePath})` 
+      });
+    });
 
     const newHumanMessage: Message = {
       id: uuidv4(),
       type: "human",
-      content: [
-        ...(input.trim().length > 0 ? [{ type: "text", text: input }] : []),
-        ...contentBlocks,
-      ] as Message["content"],
+      content: messageContent as Message["content"],
     };
 
     const toolMessages = ensureToolCallsHaveResponses(stream.messages);
@@ -232,7 +258,7 @@ export function Thread() {
     );
 
     setInput("");
-    setContentBlocks([]);
+    setUploadedFiles([]);
   };
 
   const handleRegenerate = (
@@ -447,7 +473,7 @@ export function Thread() {
                     className={cn(
                       "bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
                       dragOver
-                        ? "border-primary border-2 border-dotted"
+                        ? "border-primary border-2 border-dotted bg-blue-50"
                         : "border border-solid",
                     )}
                   >
@@ -456,8 +482,8 @@ export function Thread() {
                       className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2"
                     >
                       <ContentBlocksPreview
-                        blocks={contentBlocks}
-                        onRemove={removeBlock}
+                        files={uploadedFiles}
+                        onRemove={removeFile}
                       />
                       <textarea
                         value={input}
@@ -502,7 +528,7 @@ export function Thread() {
                         >
                           <Plus className="size-5 text-gray-600" />
                           <span className="text-sm text-gray-600">
-                            Upload PDF or Image
+                            Upload Files
                           </span>
                         </Label>
                         <input
@@ -510,7 +536,7 @@ export function Thread() {
                           type="file"
                           onChange={handleFileUpload}
                           multiple
-                          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                           className="hidden"
                         />
                         {stream.isLoading ? (
@@ -528,7 +554,7 @@ export function Thread() {
                             className="ml-auto shadow-md transition-all"
                             disabled={
                               isLoading ||
-                              (!input.trim() && contentBlocks.length === 0)
+                              (!input.trim() && uploadedFiles.length === 0)
                             }
                           >
                             Send

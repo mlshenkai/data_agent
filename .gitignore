@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.idea/
+
+# Virtual environments
+.venv
+.langgraph_api
+=*
+frontend
+examples/
+*.csv
+core*
+.cursor
+frontend/public/uploads/
+frontend/public/images/
+project_document/*
+.env
+*env

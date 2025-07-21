@@ -180,15 +180,48 @@ def fig_inter(py_code: str, fname: str) -> str:
     """
     # print("正在调用fig_inter工具运行Python代码...")
  
+    # 保存当前matplotlib后端
     current_backend = matplotlib.get_backend()
-    matplotlib.use('Agg')
+    
+    # 在macOS上强制使用Agg后端，避免线程问题
+    import platform
+    if platform.system() == 'Darwin':  # macOS
+        matplotlib.use('Agg')
+    else:
+        matplotlib.use('Agg')  # 其他系统也使用Agg后端
  
     local_vars = {"plt": plt, "pd": pd, "sns": sns}
      
-    # ✅ 设置图像保存路径（你自己的绝对路径）
-    base_dir = r"C:\Users\Administrator\Desktop\data_agent\agent-chat-ui\agent-chat-ui-main\public"
-    images_dir = os.path.join(base_dir, "images")
-    os.makedirs(images_dir, exist_ok=True)  # ✅ 自动创建 images 文件夹（如不存在）
+    # 动态设置图片保存路径（支持不同操作系统）
+    current_dir = os.getcwd()
+    
+    # 尝试多个可能的图片保存路径
+    possible_paths = [
+        os.path.join(current_dir, "frontend", "public", "images"),
+        os.path.join(current_dir, "public", "images"),
+        os.path.join(current_dir, "images"),
+        os.path.join(current_dir, "static", "images")
+    ]
+    
+    images_dir = None
+    for path in possible_paths:
+        try:
+            if os.path.exists(path) or os.access(os.path.dirname(path), os.W_OK):
+                images_dir = path
+                break
+        except:
+            continue
+    
+    # 如果找不到合适的路径，使用当前目录下的images文件夹
+    if images_dir is None:
+        images_dir = os.path.join(current_dir, "images")
+    
+    # 创建图片目录
+    try:
+        os.makedirs(images_dir, exist_ok=True)
+    except Exception as e:
+        return f"❌ 无法创建图片目录 {images_dir}：{str(e)}"
+    
     try:
         g = globals()
         exec(py_code, g, local_vars)
@@ -196,7 +229,9 @@ def fig_inter(py_code: str, fname: str) -> str:
  
         fig = local_vars.get(fname, None)
         if fig:
-            image_filename = f"{fname}.png"
+            # 生成带时间戳的文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            image_filename = f"{fname}_{timestamp}.png"
             abs_path = os.path.join(images_dir, image_filename)  # ✅ 绝对路径
             rel_path = os.path.join("images", image_filename)    # ✅ 返回相对路径（给前端用）
  
@@ -262,6 +297,29 @@ def read_file(file_path: str, file_type: str = "auto", read_params: dict = {},
     """
     
     try:
+        # 处理前端上传的文件路径
+        if file_path.startswith("uploads/"):
+            # 前端上传的文件在frontend/public/uploads/目录下
+            current_dir = os.getcwd()
+            # 尝试多个可能的路径
+            possible_paths = [
+                os.path.join(current_dir, "frontend", "public", file_path),
+                os.path.join(current_dir, "public", file_path),
+                os.path.join(current_dir, file_path),
+            ]
+            
+            # 找到第一个存在的文件路径
+            actual_file_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    actual_file_path = path
+                    break
+            
+            if actual_file_path is None:
+                return f"❌ 文件不存在：{file_path}。尝试的路径：{', '.join(possible_paths)}"
+            
+            file_path = actual_file_path
+        
         # 检查文件是否存在
         if not os.path.exists(file_path):
             return f"❌ 文件不存在：{file_path}"
@@ -607,9 +665,9 @@ def optimized_fig_inter(py_code: str, fname: str, format: str = "png", dpi: int 
                     # 自动调整失败不影响主流程
                     pass
             
-            # 生成图片文件名
+            # 生成带时间戳的图片文件名
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            image_filename = f"{fname}.{format}"
+            image_filename = f"{fname}_{timestamp}.{format}"
             abs_path = os.path.join(images_dir, image_filename)
             rel_path = os.path.join("images", image_filename)
             

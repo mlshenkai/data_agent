@@ -1,7 +1,5 @@
 import { useState, useRef, useEffect, ChangeEvent } from "react";
 import { toast } from "sonner";
-import type { Base64ContentBlock } from "@langchain/core/messages";
-import { fileToContentBlock } from "@/lib/multimodal-utils";
 
 export const SUPPORTED_FILE_TYPES = [
   "image/jpeg",
@@ -14,45 +12,61 @@ export const SUPPORTED_FILE_TYPES = [
   "text/csv",
 ];
 
+export interface UploadedFile {
+  filePath: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+}
+
 interface UseFileUploadOptions {
-  initialBlocks?: Base64ContentBlock[];
+  initialFiles?: UploadedFile[];
+  onFilePreview?: (file: UploadedFile) => void;
 }
 
 export function useFileUpload({
-  initialBlocks = [],
+  initialFiles = [],
+  onFilePreview,
 }: UseFileUploadOptions = {}) {
-  const [contentBlocks, setContentBlocks] =
-    useState<Base64ContentBlock[]>(initialBlocks);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>(initialFiles);
   const dropRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
 
-  const isDuplicate = (file: File, blocks: Base64ContentBlock[]) => {
-    if (file.type === "application/pdf" || 
-        file.type === "application/vnd.ms-excel" ||
-        file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-        file.type === "text/csv") {
-      return blocks.some(
-        (b) =>
-          b.type === "file" &&
-          b.mime_type === file.type &&
-          b.metadata?.filename === file.name,
-      );
+  const isDuplicate = (file: File, files: UploadedFile[]) => {
+    return files.some(
+      (f) => f.fileName === file.name && f.fileType === file.type
+    );
+  };
+
+  const uploadFile = async (file: File): Promise<UploadedFile | null> => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Upload failed');
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('Upload error:', error);
+      toast.error(`上传失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      return null;
     }
-    if (SUPPORTED_FILE_TYPES.includes(file.type)) {
-      return blocks.some(
-        (b) =>
-          b.type === "image" &&
-          b.metadata?.name === file.name &&
-          b.mime_type === file.type,
-      );
-    }
-    return false;
   };
 
   const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
+    
     const fileArray = Array.from(files);
     const validFiles = fileArray.filter((file) =>
       SUPPORTED_FILE_TYPES.includes(file.type),
@@ -61,10 +75,10 @@ export function useFileUpload({
       (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
     );
     const duplicateFiles = validFiles.filter((file) =>
-      isDuplicate(file, contentBlocks),
+      isDuplicate(file, uploadedFiles),
     );
     const uniqueFiles = validFiles.filter(
-      (file) => !isDuplicate(file, contentBlocks),
+      (file) => !isDuplicate(file, uploadedFiles),
     );
 
     if (invalidFiles.length > 0) {
@@ -78,10 +92,22 @@ export function useFileUpload({
       );
     }
 
-    const newBlocks = uniqueFiles.length
-      ? await Promise.all(uniqueFiles.map(fileToContentBlock))
-      : [];
-    setContentBlocks((prev) => [...prev, ...newBlocks]);
+    // 上传文件到服务器
+    const uploadPromises = uniqueFiles.map(uploadFile);
+    const uploadResults = await Promise.all(uploadPromises);
+    const successfulUploads = uploadResults.filter((result): result is UploadedFile => result !== null);
+    
+    if (successfulUploads.length > 0) {
+      setUploadedFiles((prev) => [...prev, ...successfulUploads]);
+      
+      // 触发文件预览
+      successfulUploads.forEach((uploadedFile) => {
+        if (onFilePreview) {
+          onFilePreview(uploadedFile);
+        }
+      });
+    }
+    
     e.target.value = "";
   };
 
@@ -121,10 +147,10 @@ export function useFileUpload({
         (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
       );
       const duplicateFiles = validFiles.filter((file) =>
-        isDuplicate(file, contentBlocks),
+        isDuplicate(file, uploadedFiles),
       );
       const uniqueFiles = validFiles.filter(
-        (file) => !isDuplicate(file, contentBlocks),
+        (file) => !isDuplicate(file, uploadedFiles),
       );
 
       if (invalidFiles.length > 0) {
@@ -138,10 +164,21 @@ export function useFileUpload({
         );
       }
 
-      const newBlocks = uniqueFiles.length
-        ? await Promise.all(uniqueFiles.map(fileToContentBlock))
-        : [];
-      setContentBlocks((prev) => [...prev, ...newBlocks]);
+      // 上传文件到服务器
+      const uploadPromises = uniqueFiles.map(uploadFile);
+      const uploadResults = await Promise.all(uploadPromises);
+      const successfulUploads = uploadResults.filter((result): result is UploadedFile => result !== null);
+      
+      if (successfulUploads.length > 0) {
+        setUploadedFiles((prev) => [...prev, ...successfulUploads]);
+        
+        // 触发文件预览
+        successfulUploads.forEach((uploadedFile) => {
+          if (onFilePreview) {
+            onFilePreview(uploadedFile);
+          }
+        });
+      }
     };
     const handleWindowDragEnd = (e: DragEvent) => {
       dragCounter.current = 0;
@@ -191,13 +228,13 @@ export function useFileUpload({
       window.removeEventListener("dragover", handleWindowDragOver);
       dragCounter.current = 0;
     };
-  }, [contentBlocks]);
+  }, [uploadedFiles, onFilePreview]);
 
-  const removeBlock = (idx: number) => {
-    setContentBlocks((prev) => prev.filter((_, i) => i !== idx));
+  const removeFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const resetBlocks = () => setContentBlocks([]);
+  const resetFiles = () => setUploadedFiles([]);
 
   /**
    * Handle paste event for files (images, PDFs)
@@ -227,26 +264,9 @@ export function useFileUpload({
       (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
     );
     const isDuplicate = (file: File) => {
-      if (file.type === "application/pdf" || 
-          file.type === "application/vnd.ms-excel" ||
-          file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-          file.type === "text/csv") {
-        return contentBlocks.some(
-          (b) =>
-            b.type === "file" &&
-            b.mime_type === file.type &&
-            b.metadata?.filename === file.name,
-        );
-      }
-      if (SUPPORTED_FILE_TYPES.includes(file.type)) {
-        return contentBlocks.some(
-          (b) =>
-            b.type === "image" &&
-            b.metadata?.name === file.name &&
-            b.mime_type === file.type,
-        );
-      }
-      return false;
+      return uploadedFiles.some(
+        (f) => f.fileName === file.name && f.fileType === file.type,
+      );
     };
     const duplicateFiles = validFiles.filter(isDuplicate);
     const uniqueFiles = validFiles.filter((file) => !isDuplicate(file));
@@ -261,18 +281,30 @@ export function useFileUpload({
       );
     }
     if (uniqueFiles.length > 0) {
-      const newBlocks = await Promise.all(uniqueFiles.map(fileToContentBlock));
-      setContentBlocks((prev) => [...prev, ...newBlocks]);
+      const uploadPromises = uniqueFiles.map(uploadFile);
+      const uploadResults = await Promise.all(uploadPromises);
+      const successfulUploads = uploadResults.filter((result): result is UploadedFile => result !== null);
+      
+      if (successfulUploads.length > 0) {
+        setUploadedFiles((prev) => [...prev, ...successfulUploads]);
+        
+        // 触发文件预览
+        successfulUploads.forEach((uploadedFile) => {
+          if (onFilePreview) {
+            onFilePreview(uploadedFile);
+          }
+        });
+      }
     }
   };
 
   return {
-    contentBlocks,
-    setContentBlocks,
+    uploadedFiles,
+    setUploadedFiles,
     handleFileUpload,
     dropRef,
-    removeBlock,
-    resetBlocks,
+    removeFile,
+    resetFiles,
     dragOver,
     handlePaste,
   };
